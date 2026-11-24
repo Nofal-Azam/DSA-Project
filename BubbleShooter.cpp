@@ -680,7 +680,602 @@ void quitGame() {
 }
 
 
-
-
-
 ////nofal///
+
+
+///gui////
+const float CELL = 50.f;
+const float RADIUS = CELL / 2.f - 2.f;
+const float BOARD_X = 20.f;
+const float BOARD_Y = 20.f;
+const float BOARD_W = COLS * CELL;
+const float BOARD_H = ROWS * CELL;
+const float LAUNCHER_X = BOARD_X + BOARD_W / 2.f;
+const float LAUNCHER_Y = BOARD_Y + BOARD_H + 60.f;
+const float PANEL_X = BOARD_X + BOARD_W + 25.f;
+const unsigned WINDOW_W = 790;
+const unsigned WINDOW_H = 650;
+const float SHOT_SPEED = 900.f;
+const float STEP = 4.f;
+const float HIT_DISTANCE = CELL * 0.85f;
+const float PI = 3.14159265f;
+
+struct MovingBubble {
+    float x, y;
+    float velocityX, velocityY;
+    int color;
+    bool isMoving;
+};
+
+MovingBubble shot = {LAUNCHER_X, LAUNCHER_Y, 0.f, 0.f, 0, false};
+float aimX = 0.f;
+float aimY = -1.f;
+
+string statusText = "";
+bool gameOver = false;
+bool lastGameWon = false;
+int lastGameID = 0;
+char asking = 0;
+string typedNumber = "";
+
+struct Button {
+    float x, y, width, height;
+    string label;
+};
+
+const Button newGameButton = {PANEL_X, 248.f, 200.f, 38.f, "New Game"};
+const Button undoButton = {PANEL_X, 294.f, 200.f, 38.f, "Undo"};
+
+sf::Vector2f cellCenter(int row, int col) {
+    return {BOARD_X + col * CELL + CELL / 2.f, BOARD_Y + row * CELL + CELL / 2.f};
+}
+
+void aimLauncher(sf::Vector2f mouse) {
+    float angle = atan2(mouse.y - LAUNCHER_Y, mouse.x - LAUNCHER_X);
+    const float minAngle = -PI + 0.15f;
+    const float maxAngle = -0.15f;
+
+    if (angle > maxAngle && angle <= PI / 2.f)
+        angle = maxAngle;
+    else if (angle > PI / 2.f || angle < minAngle)
+        angle = minAngle;
+
+    aimX = cos(angle);
+    aimY = sin(angle);
+}
+
+void launchBubble() {
+    if (!gameActive || shot.isMoving)
+        return;
+
+    shot.x = LAUNCHER_X;
+    shot.y = LAUNCHER_Y;
+    shot.velocityX = aimX * SHOT_SPEED;
+    shot.velocityY = aimY * SHOT_SPEED;
+    shot.color = currentBubble;
+    shot.isMoving = true;
+}
+
+void checkWallCollision() {
+    float left = BOARD_X + RADIUS;
+    float right = BOARD_X + BOARD_W - RADIUS;
+
+    if (shot.x < left) {
+        shot.x = left;
+        shot.velocityX = fabs(shot.velocityX);
+    } else if (shot.x > right) {
+        shot.x = right;
+        shot.velocityX = -fabs(shot.velocityX);
+    }
+}
+
+bool checkCollision() {
+    if (shot.y - RADIUS <= BOARD_Y)
+        return true;
+
+    for (int i = 0; i < ROWS; i++) {
+        for (int j = 0; j < COLS; j++) {
+            if (board[i][j] == 0)
+                continue;
+
+            sf::Vector2f c = cellCenter(i, j);
+            float dx = shot.x - c.x;
+            float dy = shot.y - c.y;
+
+            if (dx * dx + dy * dy < HIT_DISTANCE * HIT_DISTANCE)
+                return true;
+        }
+    }
+
+    return false;
+}
+
+bool findNearestCell(int &bestRow, int &bestCol) {
+    float bestDistance = -1.f;
+
+    for (int i = 0; i < ROWS; i++) {
+        for (int j = 0; j < COLS; j++) {
+            if (!isEmpty(i, j) || !isAttached(i, j))
+                continue;
+
+            sf::Vector2f c = cellCenter(i, j);
+            float distance = (shot.x - c.x) * (shot.x - c.x) + (shot.y - c.y) * (shot.y - c.y);
+
+            if (bestDistance < 0.f || distance < bestDistance) {
+                bestDistance = distance;
+                bestRow = i;
+                bestCol = j;
+            }
+        }
+    }
+
+    return bestDistance >= 0.f;
+}
+
+void finishShot(int row, int col) {
+    shot.isMoving = false;
+    int scoreBefore = score;
+
+    if (!shootBubble(row, col))
+        return;
+
+    int gained = score - scoreBefore;
+
+    if (gained > 0)
+        statusText = "Popped " + to_string(countMatches()) + " bubbles!  +" + to_string(gained);
+    else
+        statusText = "";
+
+    if (checkWin() || checkLose()) {
+        lastGameWon = checkWin();
+        endGame(lastGameWon);
+        lastGameID = nextGameID - 1;
+        gameOver = true;
+        statusText = "";
+    }
+}
+
+void snapBubbleToGrid() {
+    shot.isMoving = false;
+    int row = -1, col = -1;
+
+    if (findNearestCell(row, col))
+        finishShot(row, col);
+}
+
+void updateBubblePosition(float dt) {
+    if (!shot.isMoving)
+        return;
+
+    int steps = (int)ceil(SHOT_SPEED * dt / STEP);
+
+    if (steps < 1)
+        steps = 1;
+
+    float stepTime = dt / steps;
+
+    for (int i = 0; i < steps; i++) {
+        shot.x += shot.velocityX * stepTime;
+        shot.y += shot.velocityY * stepTime;
+
+        checkWallCollision();
+
+        if (checkCollision()) {
+            snapBubbleToGrid();
+            return;
+        }
+    }
+}
+
+bool isInside(const Button &b, sf::Vector2f p) {
+    return p.x >= b.x && p.x <= b.x + b.width && p.y >= b.y && p.y <= b.y + b.height;
+}
+
+bool canUndo() {
+    return gameActive && !shot.isMoving && !isStackEmpty();
+}
+
+void newGame() {
+    shot.isMoving = false;
+
+    if (gameActive)
+        restartGame();
+    else
+        startGame();
+
+    gameOver = false;
+    statusText = "New game - good luck!";
+}
+
+void pressUndo() {
+    if (!canUndo()) {
+        statusText = "Nothing to undo";
+        return;
+    }
+
+    undoMove();
+    statusText = "Last shot undone";
+}
+
+void handleClick(sf::Vector2f p) {
+    if (isInside(newGameButton, p))
+        newGame();
+    else if (isInside(undoButton, p))
+        pressUndo();
+    else if (p.x < PANEL_X - 10.f)
+        launchBubble();
+}
+
+void runCommand(char key, int number) {
+    if (key == 'H') {
+        displayRecords();
+        cout << "Total games: " << countRecords() << endl;
+    } else if (key == 'S') {
+        sortRecords();
+        displayRecords();
+    } else if (key == 'F') {
+        GameRecord *record = searchRecord(number);
+
+        if (record == NULL)
+            cout << "Game " << number << " not found!\n";
+        else
+            cout << "Game " << record->gameID << " | Score: " << record->score << " | Shots: " << record->shots
+                 << " | Result: " << (record->won ? "Win" : "Loss") << endl;
+    } else if (key == 'D') {
+        GameRecord *record = searchRecord(number);
+
+        if (record == NULL) {
+            cout << "Game " << number << " not found!\n";
+        } else {
+            root = deleteNode(root, record->score, record->gameID);
+            deleteRecord(number);
+        }
+    } else if (key == 'T') {
+        cout << "\n========== LEADERBOARD (BST) ==========\n";
+        inorder(root);
+        cout << "Preorder: ";
+        preorder(root);
+        cout << "\nPostorder: ";
+        postorder(root);
+        cout << "\nHeight: " << height(root) << endl;
+
+        if (root != NULL)
+            cout << "Lowest: " << findMin(root)->score << "   Highest: " << findMax(root)->score << endl;
+    } else if (key == 'B') {
+        int total = countNodes(root);
+
+        if (total == 0) {
+            cout << "No scores yet!\n";
+        } else {
+            int *scores = new int[total];
+            int index = 0;
+
+            storeInorder(root, scores, index);
+
+            cout << "Sorted scores: ";
+
+            for (int i = 0; i < total; i++)
+                cout << scores[i] << " ";
+
+            int position = binarySearch(scores, total, number);
+
+            if (position != -1)
+                cout << "\nScore " << number << " found at index " << position << "!\n";
+            else
+                cout << "\nScore " << number << " not found!\n";
+
+            delete[] scores;
+        }
+    }
+
+    statusText = "Results are in the text window";
+}
+
+void handleTyping(char32_t c) {
+    if (asking == 0) {
+        if (c >= 'a' && c <= 'z')
+            c = c - 'a' + 'A';
+
+        if (c == 'H' || c == 'S' || c == 'T') {
+            runCommand((char)c, 0);
+        } else if (c == 'F' || c == 'D' || c == 'B') {
+            asking = (char)c;
+            typedNumber = "";
+        }
+
+        return;
+    }
+
+    if (c >= '0' && c <= '9' && typedNumber.size() < 6) {
+        typedNumber += (char)c;
+    } else if (c == 8 && !typedNumber.empty()) {
+        typedNumber.pop_back();
+    } else if ((c == 13 || c == 10) && !typedNumber.empty()) {
+        runCommand(asking, stoi(typedNumber));
+        asking = 0;
+    } else if (c == 27) {
+        asking = 0;
+        statusText = "";
+    }
+}
+
+void collectTopScores(TreeNode *node, int scores[], int ids[], int &n, int maxCount) {
+    if (node == NULL || n >= maxCount)
+        return;
+
+    collectTopScores(node->right, scores, ids, n, maxCount);
+
+    if (n < maxCount) {
+        scores[n] = node->score;
+        ids[n] = node->gameID;
+        n++;
+    }
+
+    collectTopScores(node->left, scores, ids, n, maxCount);
+}
+
+sf::Color bubbleColor(int color) {
+    switch (color) {
+    case 1:
+        return sf::Color(220, 60, 60);
+    case 2:
+        return sf::Color(60, 110, 230);
+    case 3:
+        return sf::Color(60, 180, 80);
+    case 4:
+        return sf::Color(235, 200, 50);
+    case 5:
+        return sf::Color(150, 80, 200);
+    }
+
+    return sf::Color(128, 128, 128);
+}
+
+void drawBubble(sf::RenderTarget &target, sf::Vector2f center, float radius, int color) {
+    sf::CircleShape circle(radius);
+    circle.setOrigin({radius, radius});
+    circle.setPosition(center);
+
+    sf::Color fill = bubbleColor(color);
+    circle.setFillColor(fill);
+    circle.setOutlineThickness(2.f);
+    circle.setOutlineColor(sf::Color(fill.r / 2, fill.g / 2, fill.b / 2));
+
+    target.draw(circle);
+}
+
+void drawText(sf::RenderTarget &target, const sf::Font *font, const string &str, float x, float y,
+              unsigned size, sf::Color color, bool centered = false) {
+    if (font == NULL || str.empty())
+        return;
+
+    sf::Text text(*font, str, size);
+    text.setFillColor(color);
+
+    if (centered) {
+        sf::FloatRect bounds = text.getLocalBounds();
+        x -= bounds.position.x + bounds.size.x / 2.f;
+    }
+
+    text.setPosition({x, y});
+    target.draw(text);
+}
+
+void drawButton(sf::RenderTarget &target, const sf::Font *font, const Button &b, bool hovered,
+                bool enabled) {
+    sf::RectangleShape box({b.width, b.height});
+    box.setPosition({b.x, b.y});
+
+    sf::Color fill(70, 76, 95);
+
+    if (!enabled)
+        fill = sf::Color(48, 50, 58);
+    else if (hovered)
+        fill = sf::Color(95, 105, 140);
+
+    box.setFillColor(fill);
+    box.setOutlineThickness(1.f);
+    box.setOutlineColor(sf::Color(130, 135, 150));
+
+    target.draw(box);
+
+    sf::Color textColor = enabled ? sf::Color::White : sf::Color(110, 110, 110);
+
+    drawText(target, font, b.label, b.x + b.width / 2.f, b.y + 8.f, 18, textColor, true);
+}
+
+void drawGame(sf::RenderTarget &target, const sf::Font *font, sf::Vector2f mouse) {
+    const sf::Color white(235, 235, 235);
+    const sf::Color gray(150, 150, 160);
+
+    target.clear(sf::Color(28, 30, 38));
+
+    sf::RectangleShape boardBox({BOARD_W, BOARD_H});
+    boardBox.setPosition({BOARD_X, BOARD_Y});
+    boardBox.setFillColor(sf::Color(42, 46, 58));
+    boardBox.setOutlineThickness(2.f);
+    boardBox.setOutlineColor(sf::Color(90, 95, 110));
+
+    target.draw(boardBox);
+
+    sf::RectangleShape dangerLine({BOARD_W, 2.f});
+    dangerLine.setPosition({BOARD_X, BOARD_Y + DANGER_ROW * CELL});
+    dangerLine.setFillColor(sf::Color(200, 60, 60));
+
+    target.draw(dangerLine);
+
+    drawText(target, font, "danger line", BOARD_X + BOARD_W - 85.f, BOARD_Y + DANGER_ROW * CELL + 4.f, 13,
+             sf::Color(200, 60, 60));
+
+    for (int i = 0; i < ROWS; i++) {
+        for (int j = 0; j < COLS; j++) {
+            if (board[i][j] != 0)
+                drawBubble(target, cellCenter(i, j), RADIUS, board[i][j]);
+        }
+    }
+
+    bool canShoot = gameActive && !shot.isMoving;
+
+    if (canShoot) {
+        for (int i = 1; i <= 8; i++) {
+            float d = 30.f + i * 18.f;
+
+            sf::CircleShape dot(3.f);
+            dot.setOrigin({3.f, 3.f});
+            dot.setPosition({LAUNCHER_X + aimX * d, LAUNCHER_Y + aimY * d});
+            dot.setFillColor(sf::Color(220, 220, 220, 170));
+
+            target.draw(dot);
+        }
+    }
+
+    sf::CircleShape base(RADIUS + 8.f);
+    base.setOrigin({RADIUS + 8.f, RADIUS + 8.f});
+    base.setPosition({LAUNCHER_X, LAUNCHER_Y});
+    base.setFillColor(sf::Color(58, 62, 76));
+    base.setOutlineThickness(2.f);
+    base.setOutlineColor(sf::Color(90, 95, 110));
+
+    target.draw(base);
+
+    if (canShoot)
+        drawBubble(target, {LAUNCHER_X, LAUNCHER_Y}, RADIUS, currentBubble);
+
+    if (shot.isMoving)
+        drawBubble(target, {shot.x, shot.y}, RADIUS, shot.color);
+
+    drawText(target, font, "Move the mouse to aim, left click to shoot", LAUNCHER_X, LAUNCHER_Y + 40.f,
+             14, gray, true);
+
+    float x = PANEL_X;
+
+    drawText(target, font, "BUBBLE SHOOTER", x, 20.f, 24, white);
+    drawText(target, font, "Score: " + to_string(score), x, 64.f, 20, white);
+    drawText(target, font, "Shots: " + to_string(shotsTaken), x, 90.f, 20, white);
+    drawText(target, font, "Bubbles left: " + to_string(countBubbles()), x, 116.f, 20, white);
+    drawText(target, font, "Best: " + to_string(getHighScore()), x, 142.f, 20, white);
+    drawText(target, font, "Upcoming:", x, 180.f, 18, gray);
+
+    for (int i = 0; i < bubbleQueue.count; i++) {
+        int index = (bubbleQueue.front + i) % QUEUE_SIZE;
+        drawBubble(target, {x + 16.f + i * 38.f, 222.f}, 15.f, bubbleQueue.bubbles[index]);
+    }
+
+    drawButton(target, font, newGameButton, isInside(newGameButton, mouse), true);
+    drawButton(target, font, undoButton, isInside(undoButton, mouse), canUndo());
+
+    string message = statusText;
+
+    if (asking == 'F')
+        message = "Find game ID: " + typedNumber + "_";
+    else if (asking == 'D')
+        message = "Delete game ID: " + typedNumber + "_";
+    else if (asking == 'B')
+        message = "Search score: " + typedNumber + "_";
+
+    drawText(target, font, message, x, 342.f, 16, sf::Color(240, 210, 90));
+
+    drawText(target, font, "Top scores (BST)", x, 378.f, 18, gray);
+
+    int topScores[5], topIds[5], n = 0;
+    collectTopScores(root, topScores, topIds, n, 5);
+
+    if (n == 0)
+        drawText(target, font, "no finished games yet", x, 404.f, 16, gray);
+
+    for (int i = 0; i < n; i++) {
+        string line = to_string(i + 1) + ".  " + to_string(topScores[i]) + "   (game " + to_string(topIds[i]) + ")";
+        drawText(target, font, line, x, 404.f + i * 22.f, 16, white);
+    }
+
+    drawText(target, font, "Keys (output in text window):", x, 530.f, 15, gray);
+
+    const char *keys[] = {"H  history", "S  sort", "F  find game", "D  delete game", "T  BST traversals", "B  binary search"};
+
+    for (int i = 0; i < 6; i++)
+        drawText(target, font, keys[i], x + (i % 2) * 126.f, 554.f + (i / 2) * 21.f, 14, white);
+
+    if (gameOver) {
+        sf::RectangleShape shade({BOARD_W, BOARD_H});
+        shade.setPosition({BOARD_X, BOARD_Y});
+        shade.setFillColor(sf::Color(0, 0, 0, 170));
+
+        target.draw(shade);
+
+        float cx = BOARD_X + BOARD_W / 2.f;
+
+        drawText(target, font, lastGameWon ? "YOU WIN!" : "GAME OVER", cx, 180.f, 44,
+                 lastGameWon ? sf::Color(90, 210, 110) : sf::Color(230, 80, 80), true);
+
+        drawText(target, font, "Final score: " + to_string(score), cx, 255.f, 22, white, true);
+        drawText(target, font, "Saved as game #" + to_string(lastGameID), cx, 290.f, 18, gray, true);
+        drawText(target, font, "Click  New Game  to play again", cx, 335.f, 18, white, true);
+    }
+}
+
+bool loadFont(sf::Font &font) {
+    const char *paths[] = {"font.ttf", "C:/Windows/Fonts/arial.ttf", "C:/Windows/Fonts/segoeui.ttf",
+                           "C:/Windows/Fonts/tahoma.ttf", "C:/Windows/Fonts/calibri.ttf"};
+
+    for (const char *path : paths) {
+        ifstream file(path);
+
+        if (file.good() && font.openFromFile(path))
+            return true;
+    }
+
+    return false;
+}
+
+int main() {
+    srand(time(0));
+
+    sf::RenderWindow window(sf::VideoMode({WINDOW_W, WINDOW_H}), "Bubble Shooter",
+                            sf::Style::Titlebar | sf::Style::Close);
+
+    window.setFramerateLimit(60);
+
+    sf::Font font;
+    bool fontLoaded = loadFont(font);
+
+    if (!fontLoaded)
+        cout << "No font found - the game works, but text will not be shown.\n";
+
+    cout << "BUBBLE SHOOTER - this text window shows the data structures.\n";
+    cout << "Press H, S, F, D, T or B in the game window to use them.\n";
+
+    startGame();
+
+    sf::Clock clock;
+
+    while (window.isOpen()) {
+        while (const optional event = window.pollEvent()) {
+            if (event->is<sf::Event::Closed>()) {
+                window.close();
+            } else if (const auto *click = event->getIf<sf::Event::MouseButtonPressed>()) {
+                if (click->button == sf::Mouse::Button::Left)
+                    handleClick(window.mapPixelToCoords(click->position));
+            } else if (const auto *typed = event->getIf<sf::Event::TextEntered>()) {
+                handleTyping(typed->unicode);
+            }
+        }
+
+        float dt = clock.restart().asSeconds();
+
+        if (dt > 0.05f)
+            dt = 0.05f;
+
+        sf::Vector2f mouse = window.mapPixelToCoords(sf::Mouse::getPosition(window));
+
+        if (!shot.isMoving)
+            aimLauncher(mouse);
+
+        updateBubblePosition(dt);
+        drawGame(window, fontLoaded ? &font : NULL, mouse);
+        window.display();
+    }
+
+    quitGame();
+
+    return 0;
+}
