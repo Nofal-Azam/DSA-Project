@@ -318,6 +318,366 @@ bool checkLose() {
 
 
 /////faizan//////
+class GameRecord {
+  public:
+    int gameID;
+    int score;
+    int shots;
+    bool won;
+    GameRecord *next;
+};
+GameRecord *head = NULL;
+void insertRecord(int id, int points, int shots, bool result) {
+    GameRecord *newNode = new GameRecord;
+    newNode->gameID = id;
+    newNode->score = points;
+    newNode->shots = shots;
+    newNode->won = result;
+    newNode->next = NULL;
+    if (head == NULL) {
+        head = newNode;
+        return;
+    }
+    GameRecord *temp = head;
+    while (temp->next != NULL) {
+        temp = temp->next;
+    }
+    temp->next = newNode;
+}
+void displayRecords() {
+    if (head == NULL) {
+        cout << "No game records found!\n";
+        return;
+    }
+
+    GameRecord *temp = head;
+    cout << "\n========== GAME HISTORY ==========\n";
+    while (temp != NULL) {
+        cout << "Game ID: " << temp->gameID << " | Score: " << temp->score
+             << " | Shots: " << temp->shots << " | Result: " << (temp->won ? "Win" : "Loss")
+             << endl;
+        temp = temp->next;
+    }
+}
+GameRecord *searchRecord(int id) {
+    GameRecord *temp = head;
+    while (temp != NULL) {
+        if (temp->gameID == id)
+            return temp;
+        temp = temp->next;
+    }
+    return NULL;
+}
+void deleteRecord(int id) {
+    if (head == NULL)
+        return;
+    if (head->gameID == id) {
+        GameRecord *temp = head;
+        head = head->next;
+        delete temp;
+        cout << "Record deleted!\n";
+        return;
+    }
+    GameRecord *temp = head;
+    while (temp->next != NULL && temp->next->gameID != id) {
+        temp = temp->next;
+    }
+    if (temp->next == NULL) {
+        cout << "Record not found!\n";
+        return;
+    }
+    GameRecord *del = temp->next;
+    temp->next = del->next;
+    delete del;
+    cout << "Record deleted!\n";
+}
+int countRecords() {
+    int count = 0;
+    GameRecord *temp = head;
+    while (temp != NULL) {
+        count++;
+        temp = temp->next;
+    }
+    return count;
+}
+GameRecord *getMiddle(GameRecord *start) {
+    if (start == NULL)
+
+        return NULL;
+    GameRecord *slow = start;
+    GameRecord *fast = start->next;
+    while (fast != NULL && fast->next != NULL) {
+        slow = slow->next;
+        fast = fast->next->next;
+    }
+    return slow;
+}
+GameRecord *mergeLists(GameRecord *a, GameRecord *b) {
+    if (a == NULL)
+        return b;
+    if (b == NULL)
+        return a;
+    GameRecord *result = NULL;
+    if (a->score >= b->score) {
+        result = a;
+        result->next = mergeLists(a->next, b);
+    } else {
+        result = b;
+        result->next = mergeLists(a, b->next);
+    }
+    return result;
+}
+GameRecord *mergeSort(GameRecord *start) {
+    if (start == NULL || start->next == NULL)
+        return start;
+    GameRecord *middle = getMiddle(start);
+    GameRecord *secondHalf = middle->next;
+    middle->next = NULL;
+    GameRecord *left = mergeSort(start);
+    GameRecord *right = mergeSort(secondHalf);
+    return mergeLists(left, right);
+}
+void sortRecords() {
+    head = mergeSort(head);
+    cout << "Game records sorted by score!\n";
+}
+
+// ============================ BST (leaderboard) ============================
+class TreeNode {
+  public:
+    int score;
+    int gameID;
+    TreeNode *left;
+    TreeNode *right;
+};
+TreeNode *root = NULL;
+bool comesBefore(int score1, int id1, int score2, int id2) {
+    if (score1 != score2)
+        return score1 < score2;
+    return id1 < id2;
+}
+TreeNode *insertNode(TreeNode *node, int points, int id) {
+    if (node == NULL) {
+        TreeNode *newNode = new TreeNode;
+        newNode->score = points;
+        newNode->gameID = id;
+        newNode->left = NULL;
+        newNode->right = NULL;
+        return newNode;
+    }
+    if (comesBefore(points, id, node->score, node->gameID)) {
+        node->left = insertNode(node->left, points, id);
+    } else {
+        node->right = insertNode(node->right, points, id);
+    }
+    return node;
+}
+TreeNode *searchNode(TreeNode *node, int points, int id) {
+    if (node == NULL)
+        return NULL;
+    if (node->score == points && node->gameID == id)
+        return node;
+    if (comesBefore(points, id, node->score, node->gameID))
+
+        return searchNode(node->left, points, id);
+    return searchNode(node->right, points, id);
+}
+TreeNode *findMin(TreeNode *node) {
+    if (node == NULL)
+        return NULL;
+    while (node->left != NULL) {
+        node = node->left;
+    }
+    return node;
+}
+TreeNode *findMax(TreeNode *node) {
+    if (node == NULL)
+        return NULL;
+    while (node->right != NULL) {
+        node = node->right;
+    }
+    return node;
+}
+void inorder(TreeNode *node) {
+    if (node == NULL)
+        return;
+    inorder(node->left);
+    cout << "Game " << node->gameID << " | Score: " << node->score << endl;
+    inorder(node->right);
+}
+void preorder(TreeNode *node) {
+    if (node == NULL)
+        return;
+    cout << node->score << " ";
+    preorder(node->left);
+    preorder(node->right);
+}
+void postorder(TreeNode *node) {
+    if (node == NULL)
+        return;
+    postorder(node->left);
+
+    postorder(node->right);
+    cout << node->score << " ";
+}
+TreeNode *deleteNode(TreeNode *node, int points, int id) {
+    if (node == NULL)
+        return NULL;
+    if (comesBefore(points, id, node->score, node->gameID)) {
+        node->left = deleteNode(node->left, points, id);
+    } else if (comesBefore(node->score, node->gameID, points, id)) {
+        node->right = deleteNode(node->right, points, id);
+    } else {
+        if (node->left == NULL) {
+            TreeNode *temp = node->right;
+            delete node;
+            return temp;
+        }
+        if (node->right == NULL) {
+            TreeNode *temp = node->left;
+            delete node;
+            return temp;
+        }
+        TreeNode *successor = findMin(node->right);
+        node->score = successor->score;
+        node->gameID = successor->gameID;
+        node->right = deleteNode(node->right, successor->score, successor->gameID);
+    }
+    return node;
+}
+int height(TreeNode *node) {
+    if (node == NULL)
+        return 0;
+
+    int leftHeight = height(node->left);
+    int rightHeight = height(node->right);
+    if (leftHeight > rightHeight)
+        return leftHeight + 1;
+    return rightHeight + 1;
+}
+int countNodes(TreeNode *node) {
+    if (node == NULL)
+        return 0;
+    return 1 + countNodes(node->left) + countNodes(node->right);
+}
+// highest score ever recorded = right-most node of the BST
+int getHighScore() {
+    TreeNode *best = findMax(root);
+    if (best == NULL)
+        return 0;
+    return best->score;
+}
+
+// ============================ SEARCHING (binary search) ============================
+// inorder traversal of a BST visits keys in ascending order -> fills a sorted array
+void storeInorder(TreeNode *node, int arr[], int &index) {
+    if (node == NULL)
+        return;
+    storeInorder(node->left, arr, index);
+    arr[index++] = node->score;
+    storeInorder(node->right, arr, index);
+}
+int binarySearch(int arr[], int size, int key) {
+    int low = 0;
+    int high = size - 1;
+    while (low <= high) {
+        int mid = low + (high - low) / 2;
+        if (arr[mid] == key)
+            return mid;
+        if (arr[mid] < key)
+            low = mid + 1;
+        else
+            high = mid - 1;
+    }
+    return -1;
+}
+
+// ============================ RECORDS + LEADERBOARD (kept in sync) ============================
+void updateRecord(int id, int newScore) {
+    GameRecord *temp = searchRecord(id);
+    if (temp == NULL) {
+        cout << "Record not found!\n";
+        return;
+    }
+    // the BST is ordered by score, so the old key must be removed and the new one inserted
+    root = deleteNode(root, temp->score, temp->gameID);
+    temp->score = newScore;
+    root = insertNode(root, temp->score, temp->gameID);
+
+    cout << "Record updated!\n";
+}
+void saveGameResult(bool won) {
+    int id = nextGameID++;
+    insertRecord(id, score, shotsTaken, won);
+    root = insertNode(root, score, id);
+    cout << "\nGame saved successfully!\n";
+    cout << "Game ID: " << id << endl;
+    cout << "Final score: " << score << endl;
+    cout << "Best score so far: " << getHighScore() << endl;
+}
+
+// ============================ GAME CONTROL ============================
+bool shootBubble(int row, int col) {
+    if (!gameActive) {
+        cout << "Start a game first!\n";
+        return false;
+    }
+    if (!isValidCell(row, col) || !isEmpty(row, col)) {
+        cout << "Invalid position!\n";
+        return false;
+    }
+    if (!isAttached(row, col)) {
+        cout << "A bubble must touch the top wall or another bubble (above or beside it)!\n";
+        return false;
+    }
+    push();
+    placeBubble(row, col, currentBubble);
+    shotsTaken++;
+    cout << "Bubble placed: " << currentBubble << endl;
+    processMatches(row, col);
+    nextBubble();
+    return true;
+}
+void startGame() {
+    initializeBoard();
+    initializeQueue();
+
+    initializeStack();
+    resetScore();
+    shotsTaken = 0;
+    nextBubble();
+    gameActive = true;
+    cout << "\nNew game started!\n";
+    cout << "Current bubble: " << currentBubble << endl;
+}
+void restartGame() {
+    cout << "\nCurrent game abandoned (it is not saved).\n";
+    startGame();
+}
+void endGame(bool won) {
+    gameActive = false;
+    saveGameResult(won);
+    initializeStack(); // a finished game is final - its undo history is cleared
+}
+void clearRecords() {
+    while (head != NULL) {
+        GameRecord *temp = head;
+        head = head->next;
+        delete temp;
+    }
+}
+void clearTree(TreeNode *node) {
+    if (node == NULL)
+        return;
+    clearTree(node->left);
+    clearTree(node->right);
+    delete node;
+}
+void quitGame() {
+    clearRecords();
+    clearTree(root);
+    root = NULL;
+}
 
 
 
